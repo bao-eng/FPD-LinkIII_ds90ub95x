@@ -24,6 +24,7 @@
 #define I2C_DS90UB954_H
 
 #include <linux/i2c.h>
+#include <linux/gpio/consumer.h>
 
 /*------------------------------------------------------------------------------
  * Deserializer registers
@@ -1185,8 +1186,8 @@ struct ds90ub954_priv {
 	struct i2c_client *client;
 	struct regmap *regmap;
 	struct ds90ub953_priv *ser[NUM_SERIALIZER]; //serializers
-	int pass_gpio;
-	int lock_gpio;
+	struct gpio_desc *pass_gpio;
+	struct gpio_desc *lock_gpio;
 	int pdb_gpio;
 	int sel_rx_port; // selected rx port
 	int sel_ia_config; // selected ia configuration

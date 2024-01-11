@@ -31,6 +31,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/regmap.h>
+#include <linux/interrupt.h>
 
 #include "ds90ub954.h"
 
@@ -88,6 +89,13 @@ static const u8 ds90ub95x_tp_reg_val[] = {
 	0xB1, TI954_REG_IA_PGEN_VFP,
 	0xB2, 0x0A,
 };
+
+static irqreturn_t ds90ub954_gpio_isr(int irq, void *devid)
+{
+	struct device *dev = devid;
+	dev_info(dev, "gpio isr!\n");
+	return IRQ_HANDLED;
+}
 
 /*------------------------------------------------------------------------------
  * DS90UB954 FUNCTIONS
@@ -718,31 +726,17 @@ static int ds90ub954_init_gpio(const struct ds90ub954_priv *priv)
 {
 	struct device *dev = &priv->client->dev;
 	int err = 0;
+	int ret = 0;
 
-	if(gpio_is_valid(priv->pass_gpio)) {
-		err = gpio_request(priv->pass_gpio, "ds90ub954_pass_gpio");
-		if(unlikely(err < 0)) {
-			dev_err(dev, "unable to request pass_gpio (%d)\n", err);
-			goto done;
-		}
-		err = gpio_direction_input(priv->pass_gpio);
-		if(unlikely(err < 0)) {
-			dev_err(dev, "unable to configure pass_gpio as input (%d)\n", err);
-			goto done;
-		}
-	}
-
-	if(gpio_is_valid(priv->lock_gpio)) {
-		err = gpio_request(priv->lock_gpio, "ds90ub954_lock_gpio");
-		if(unlikely(err < 0)) {
-			dev_err(dev, "unable to request lock_gpio (%d)\n", err);
-			goto done;
-		}
-		err = gpio_direction_input(priv->lock_gpio);
-		if(unlikely(err < 0)) {
-			dev_err(dev, "unable to configure lock_gpio as input (%d)\n", err);
-			goto done;
-		}
+	if (priv->pass_gpio) {
+		ret = gpiod_to_irq(priv->pass_gpio);
+		if (ret >= 0)
+			ret = devm_request_any_context_irq(dev, ret,
+				ds90ub954_gpio_isr,
+				IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+				dev_name(dev), dev);
+		if (ret < 0)
+			dev_warn(dev, "Failed to request pass irq\n");
 	}
 
 	if(gpio_is_valid(priv->pdb_gpio)) {
@@ -764,13 +758,6 @@ done:
 
 static void ds90ub954_free_gpio(const struct ds90ub954_priv *priv)
 {
-
-	if(priv->pass_gpio >= 0) {
-		gpio_free(priv->pass_gpio);
-	}
-	if(priv->lock_gpio >= 0) {
-		gpio_free(priv->lock_gpio);
-	}
 	if(priv->pdb_gpio >= 0) {
 		gpio_free(priv->pdb_gpio);
 	}
@@ -809,27 +796,13 @@ static int ds90ub954_parse_dt(struct ds90ub954_priv *priv)
 		return -ENODEV;
 	}
 
-	gpio = of_get_named_gpio(np, "pass-gpio", 0);
-	if(gpio < 0) {
-		if(gpio == -EPROBE_DEFER) {
-			err = gpio;
-			dev_err(dev, "pass-gpio read failed: (%d)\n", err);
-			return err;
-		}
-		dev_info(dev, "pass-gpio not found, ignoring\n");
-	}
-	priv->pass_gpio = gpio;
+	priv->pass_gpio = devm_gpiod_get_optional(dev, "pass", GPIOD_IN);
 
-	gpio = of_get_named_gpio(np, "lock-gpio", 0);
-	if(gpio < 0) {
-		if(gpio == -EPROBE_DEFER) {
-			err = gpio;
-			dev_err(dev, "lock-gpio read failed: (%d)\n", err);
-			return err;
-		}
-		dev_info(dev, "lock-gpio not found, ignoring\n");
+	if (IS_ERR(priv->pass_gpio)) {
+		err = PTR_ERR(priv->pass_gpio);
+		dev_err(dev, "Failed to acquire pass GPIO: %d\n", err);
+		return err;
 	}
-	priv->lock_gpio = gpio;
 
 	gpio = of_get_named_gpio(np, "pdb-gpio", 0);
 	if(gpio < 0) {
