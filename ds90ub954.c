@@ -722,10 +722,9 @@ init_err:
 	return err;
 }
 
-static int ds90ub954_init_gpio(const struct ds90ub954_priv *priv)
+static int ds90ub954_init_gpio_irq(const struct ds90ub954_priv *priv)
 {
 	struct device *dev = &priv->client->dev;
-	int err = 0;
 	int ret = 0;
 
 	if (priv->pass_gpio) {
@@ -738,6 +737,14 @@ static int ds90ub954_init_gpio(const struct ds90ub954_priv *priv)
 		if (ret < 0)
 			dev_warn(dev, "Failed to request pass irq\n");
 	}
+
+	return ret;
+}
+
+static int ds90ub954_init_gpio(const struct ds90ub954_priv *priv)
+{
+	struct device *dev = &priv->client->dev;
+	int err = 0;
 
 	if(gpio_is_valid(priv->pdb_gpio)) {
 		err = gpio_request(priv->pdb_gpio, "ds90ub954_pdb_gpio");
@@ -1653,6 +1660,12 @@ static int ds90ub954_probe(struct i2c_client *client,
 	}
 
 	msleep(500);
+
+	err = ds90ub954_init_gpio_irq(priv);
+	if(unlikely(err < 0)) {
+		dev_err(dev, "%s: error initializing gpio irqs\n", __func__);
+		// goto err_init_gpio;
+	}
 
 #ifdef ENABLE_SYSFS_TP
 	/* device attribute on sysfs */
